@@ -2,15 +2,23 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Build.Framework;
+using Microsoft.Build.Utilities;
+using Microsoft.DotNet.Darc.Models.VirtualMonoRepo;
 using Microsoft.DotNet.DarcLib;
 using Microsoft.DotNet.DarcLib.Helpers;
 using Microsoft.DotNet.DarcLib.VirtualMonoRepo;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Configuration;
+using Microsoft.Extensions.Options;
+using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace Microsoft.DotNet.VirtualMonoRepo.Tasks;
 
@@ -55,9 +63,31 @@ public class VirtualMonoRepo_Initialize : Build.Utilities.Task, ICancelableTask
 
     public void Cancel() => _cancellationToken.Cancel();
 
-    private IServiceProvider CreateServiceProvider() => new ServiceCollection()
-        .AddLogging(b => b.AddConsole().AddFilter(l => l >= LogLevel.Information))
-        .AddSingleton<IRemoteFactory>(sp => ActivatorUtilities.CreateInstance<RemoteFactory>(sp, TmpPath))
-        .AddVmrManagers("git", sp => new VmrManagerConfiguration(VmrPath, TmpPath))
-        .BuildServiceProvider();
+    private IServiceProvider CreateServiceProvider()
+    {
+        var serviceCollection = new ServiceCollection();
+
+        serviceCollection.AddSingleton<TaskLoggingHelper>(Log);
+        serviceCollection.Add(ServiceDescriptor.Singleton(typeof(ILogger<>), typeof(MSBuildLogger<>)));
+        serviceCollection.Add(ServiceDescriptor.Singleton(typeof(ILogger), typeof(MSBuildLogger<>)));
+
+        serviceCollection.TryAddTransient<IProcessManager>(sp => ActivatorUtilities.CreateInstance<ProcessManager>(sp, "git"));
+        serviceCollection.TryAddTransient<ILocalGitRepo>(sp => ActivatorUtilities.CreateInstance<LocalGitClient>(sp, "git"));
+        serviceCollection.AddSingleton<IVmrManagerConfiguration>(new VmrManagerConfiguration(VmrPath, TmpPath));
+        serviceCollection.TryAddTransient<ISourceMappingParser, SourceMappingParser>();
+        serviceCollection.TryAddTransient<IVersionDetailsParser, VersionDetailsParser>();
+        serviceCollection.TryAddTransient<IVmrDependencyTracker, VmrDependencyTracker>();
+        serviceCollection.TryAddTransient<IVmrPatchHandler, VmrPatchHandler>();
+        serviceCollection.TryAddTransient<IVmrUpdater, VmrUpdater>();
+        serviceCollection.TryAddTransient<IVmrInitializer, VmrInitializer>();
+        serviceCollection.TryAddSingleton<IFileSystem, FileSystem>();
+        serviceCollection.TryAddSingleton<IReadOnlyCollection<SourceMapping>>(sp =>
+        {
+            var configuration = sp.GetRequiredService<IVmrManagerConfiguration>();
+            var mappingParser = sp.GetRequiredService<ISourceMappingParser>();
+            return mappingParser.ParseMappings(configuration.VmrPath).GetAwaiter().GetResult();
+        });
+
+        return serviceCollection.BuildServiceProvider();
+    }
 }
