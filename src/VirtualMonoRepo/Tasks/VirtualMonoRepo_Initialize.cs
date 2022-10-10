@@ -11,6 +11,7 @@ using Microsoft.DotNet.DarcLib.Helpers;
 using Microsoft.DotNet.DarcLib.VirtualMonoRepo;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 namespace Microsoft.DotNet.VirtualMonoRepo.Tasks;
 
@@ -56,7 +57,10 @@ public class VirtualMonoRepo_Initialize : Build.Utilities.Task, ICancelableTask
     public void Cancel() => _cancellationToken.Cancel();
 
     private IServiceProvider CreateServiceProvider() => new ServiceCollection()
-        .AddLogging(b => b.AddConsole().AddFilter(l => l >= LogLevel.Information))
+        .AddLogging(b => b
+            .AddConsole(o => o.FormatterName = CompactConsoleLoggerFormatter.FormatterName)
+            .AddFilter(l => l >= LogLevel.Information).AddConsole()
+            .AddConsoleFormatter<CompactConsoleLoggerFormatter, SimpleConsoleFormatterOptions>())
         .AddSingleton<IRemoteFactory>(sp => ActivatorUtilities.CreateInstance<RemoteFactory>(sp, TmpPath))
         .AddVmrManagers("git", sp => new VmrManagerConfiguration(VmrPath, TmpPath))
         .BuildServiceProvider();
