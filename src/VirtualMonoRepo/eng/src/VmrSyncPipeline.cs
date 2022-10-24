@@ -56,6 +56,7 @@ internal class VmrSyncPipeline : SingleStagePipelineDefinition
             {
                 { "targetRef", parameters["targetRef"] },
                 { "vmrBranch", parameters["vmrBranch"] },
+                { "vmrToken", variables[Configuration.DarcBotPatVariable] },
             })
         }
     };

@@ -17,6 +17,10 @@ parameters:
   type: string
   default: $(Build.SourceBranchName)
 
+- name: vmrToken
+  type: string
+  default: PAT that allows pushing to dotnet/dotnet
+
 jobs:
 - job: Synchronize
   displayName: Synchronize dotnet/dotnet
@@ -41,7 +45,6 @@ jobs:
     displayName: Checkout dotnet/dotnet
     fetchDepth: 0
     path: vmr
-    timeoutInMinutes: 30
 
   - script: |-
       source ./eng/common/tools.sh
@@ -56,21 +59,19 @@ jobs:
       displayName: '[PR Only] Prepare dotnet/installer clone'
 
   - script: |-
-      $(Agent.BuildDirectory)/installer/.dotnet/dotnet darc vmr update --vmr $(Agent.BuildDirectory)/vmr --tmp $(Agent.TempDirectory) --azdev-pat $(System.AccessToken) --github-pat $(BotAccount-dotnet-bot-repo-PAT) --recursive --verbose installer:${{ parameters.targetRef }}
+      $(Agent.BuildDirectory)/installer/.dotnet/dotnet darc vmr update --vmr $(Agent.BuildDirectory)/vmr --tmp $(Agent.TempDirectory) --azdev-pat $(System.AccessToken) --github-pat ${{ parameters.vmrToken }} --recursive --verbose installer:${{ parameters.targetRef }}
     displayName: Synchronize dotnet/dotnet
     workingDirectory: $(Agent.BuildDirectory)/installer
-    timeoutInMinutes: 90
 
   - ${{ if and(ne(variables['Build.Reason'], 'PullRequest'), eq(variables['System.TeamProject'], 'internal')) }}:
     - script: |-
         set -x
         git config --global user.email 'dotnet-maestro[bot]@users.noreply.github.com' && git config --global user.name 'dotnet-maestro[bot]'
-        git remote add dotnet 'https://$(BotAccount-dotnet-bot-repo-PAT)@github.com/dotnet/dotnet.git'
+        git remote add dotnet 'https://${{ parameters.vmrToken }}@github.com/dotnet/dotnet.git'
         git fetch dotnet
         git branch ${{ parameters.vmrBranch }}
         git branch --set-upstream-to=dotnet/${{ parameters.vmrBranch }} ${{ parameters.vmrBranch }} || echo 'Branch ${{ parameters.vmrBranch }} not found in remote'
         git push dotnet ${{ parameters.vmrBranch }}
       displayName: Push changes to dotnet/dotnet
       workingDirectory: $(Agent.BuildDirectory)/vmr
-      timeoutInMinutes: 60
   timeoutInMinutes: 120

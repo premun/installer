@@ -15,6 +15,11 @@ internal class VmrSyncJobTemplate : JobTemplateDefinition
     public override TargetPathType TargetPathType => TargetPathType.RelativeToGitRoot;
     public override string TargetFile => $"{Configuration.PipelineRootDir}/{TemplatePath}";
 
+    public override string[]? Header => base.Header!.Concat(new[]
+    {
+        $"These steps synchronize code from product repositories into the VMR (https://github.com/{Configuration.VmrName})"
+    }).ToArray();
+
     #endregion
 
     #region Environment definitions
@@ -28,12 +33,8 @@ internal class VmrSyncJobTemplate : JobTemplateDefinition
     {
         StringParameter("targetRef", "Target revision in dotnet/installer to synchronize", variables.Build.SourceVersion),
         StringParameter("vmrBranch", $"{Configuration.VmrName} branch to use", variables.Build.SourceBranchName),
+        StringParameter("vmrToken", "PAT that allows pushing to dotnet/dotnet"),
     };
-
-    public override string[]? Header => base.Header!.Concat(new[]
-    {
-        $"These steps synchronize code from product repositories into the VMR (https://github.com/{Configuration.VmrName})"
-    }).ToArray();
 
     public override ConditionedList<JobBase> Definition => new()
     {
@@ -67,7 +68,6 @@ internal class VmrSyncJobTemplate : JobTemplateDefinition
                 Checkout.Repository("vmr") with
                 {
                     DisplayName = $"Checkout {Configuration.VmrName}",
-                    Timeout = TimeSpan.FromMinutes(30),
                     Clean = true,
                     Path = "vmr",
                     FetchDepth = 0,
@@ -82,8 +82,10 @@ internal class VmrSyncJobTemplate : JobTemplateDefinition
                     DisplayName = $"Restore toolset",
                     WorkingDirectory = InstallerPath,
                 },
-
-                // For pull requests, we need to make sure that the commit from the PR is available in the clone
+                
+                // TODO (https://github.com/dotnet/arcade/issues/11386): Remove this step
+                // This step is here so that darc can find the PR commit (which might be in some fork)
+                // We need to make darc understand that it needs to look in the fork from this PR
                 If.IsPullRequest
                     .Step(Script.Inline($"cp -r {InstallerPath} {variables.Agent.TempDirectory}/installer") with
                     {
@@ -95,13 +97,12 @@ internal class VmrSyncJobTemplate : JobTemplateDefinition
                     $"--vmr {VmrPath} " +
                     $"--tmp {variables.Agent.TempDirectory} " +
                     $"--azdev-pat {variables.System.AccessToken} " +
-                    $"--github-pat {variables[Configuration.DarcBotPatVariable]} " +
+                    $"--github-pat {parameters["vmrToken"]} " +
                     "--recursive " +
                     "--verbose " +
                     $"installer:{parameters["targetRef"]}") with
                 {
                     DisplayName = $"Synchronize {Configuration.VmrName}",
-                    Timeout = TimeSpan.FromMinutes(90),
                     WorkingDirectory = InstallerPath,
                 },
 
@@ -110,7 +111,7 @@ internal class VmrSyncJobTemplate : JobTemplateDefinition
                         $"""
                         set -x
                         git config --global user.email '{Configuration.DarcBotEmail}' && git config --global user.name '{Configuration.DarcBotName}'
-                        git remote add dotnet 'https://{variables[Configuration.DarcBotPatVariable]}@github.com/{Configuration.VmrName}.git'
+                        git remote add dotnet 'https://{parameters["vmrToken"]}@github.com/{Configuration.VmrName}.git'
                         git fetch dotnet
                         git branch {parameters["vmrBranch"]}
                         git branch --set-upstream-to=dotnet/{parameters["vmrBranch"]} {parameters["vmrBranch"]} || echo 'Branch {parameters["vmrBranch"]} not found in remote'
@@ -118,7 +119,6 @@ internal class VmrSyncJobTemplate : JobTemplateDefinition
                         """) with
                         {
                             DisplayName = $"Push changes to {Configuration.VmrName}",
-                            Timeout = TimeSpan.FromHours(1),
                             WorkingDirectory = VmrPath,
                         })
             }

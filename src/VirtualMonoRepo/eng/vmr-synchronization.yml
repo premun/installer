@@ -44,3 +44,4 @@ jobs:
   parameters:
     targetRef: ${{ parameters.targetRef }}
     vmrBranch: ${{ parameters.vmrBranch }}
+    vmrToken: $(BotAccount-dotnet-bot-repo-PAT)
